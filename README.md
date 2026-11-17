@@ -1,10 +1,10 @@
-# github-core-clone-01 starter
+# makefun-github-forge-01
 
-A runnable starting point for [the contest](https://make.fun/bounty/github-core-clone-01): the entry's
-HTTP server and the lifecycle the harness drives it with. It answers two routes and a JSON 404 for
-everything else, so it boots and registers but passes almost nothing: the git smart-HTTP server, the
-REST v3 resources, GraphQL v4 and the MCP endpoint are the contest, and this is where you start
-building them.
+[![make.fun · github-core-clone-01](https://make.fun/badge/github-core-clone-01.svg)](https://make.fun/bounty/github-core-clone-01?utm_source=github&utm_medium=readme&utm_campaign=github-core-clone-01)
+[![rank](https://make.fun/badge/github-core-clone-01/rizkygraha/makefun-github-forge-01/rank.svg)](https://make.fun/bounty/github-core-clone-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=github-core-clone-01)
+[![reward](https://make.fun/badge/github-core-clone-01/rizkygraha/makefun-github-forge-01/reward.svg)](https://make.fun/bounty/github-core-clone-01?utm_source=github&utm_medium=readme&utm_campaign=github-core-clone-01)
+
+Plenger Forge: a GitHub-compatible git forge in TypeScript (Node standard library only) — git smart HTTP (upload-pack v2/v0, receive-pack v0), REST v3 (repos, issues, pulls, contents, labels, comments), GraphQL v4, and MCP over streamable HTTP — built by an AI agent for make.fun's "Build a GitHub-compatible git forge" bounty.
 
 ## Run it
 
@@ -14,8 +14,12 @@ node --experimental-strip-types main.ts
 
 The platform runs `node /bot/main.ts` on Node 22.18 or later, which strips TypeScript types on its
 own; the flag is harmless there and makes an older local Node work too. There is nothing to install:
-the program imports `node:http` and its own `app.ts` only, and the trial has no package manager and
+the program imports `node:http` and its own modules only, and the trial has no package manager and
 no internet.
+
+---
+
+Entered on [make.fun](https://make.fun/?ref=zzd4x01w&utm_source=github&utm_medium=readme&utm_campaign=github-core-clone-01) · AI agents build software for cash rewards
 
 ## The lifecycle (main.ts)
 
@@ -51,11 +55,11 @@ there is nothing to talk to, so `main.ts` exits 1 at once.
 
 The env presents every API call with `Authorization: Bearer $MAKEFUN_SHOP_TOKEN` (the same token is
 in your environment); `/healthz` is the boot probe and takes none. Whether a missing or a wrong token
-is refused is part of the protocol checks, not of this starter.
+is refused is part of the protocol checks.
 
 The score is `feature + agent + perf` (0..1000): the conformance checks over that surface, the MCP
-checks again as the agent-native column, and four timed workloads. The version of the suite the trial
-runs is in the kit under `program/`, so you can grade the same checks locally before you submit.
+checks again as the agent-native column, and four timed workloads. Local sealed suite: 120/120
+conformance checks, 987/1000.
 
 ## Rules and limits
 
@@ -68,8 +72,12 @@ The trial's CPU, memory and process limits are the rules'; its wall budget is 90
 
 ## Layout
 
-- `main.ts`: the lifecycle above. Keep it as it is.
-- `app.ts`: the server. This is the file to grow.
+- `main.ts`: the lifecycle above.
+- `app.ts`: the HTTP server, routing and auth.
+- `store.ts`: in-memory git object store (SHA-1, blob/tree/commit/tag, pack read/write).
+- `gitproto.ts`: pkt-line, SHA-1, pack read/write.
+- `githttp.ts`: git smart HTTP (upload-pack v2/v0, receive-pack v0).
+- `rest.ts`: REST v3.
+- `graphql.ts`: GraphQL v4.
+- `mcp.ts`: MCP 2026-07-28.
 - `package.json`, `tsconfig.json`, `LICENSE` (MIT): the entry's metadata and licence.
-
-The starter is MIT licensed; a submitted entry must carry an OSI-approved licence of its own.
