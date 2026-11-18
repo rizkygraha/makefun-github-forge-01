@@ -125,8 +125,13 @@ export class Store {
   }
 
   /** ISO-8601 timestamp for sequence `seq` (deterministic: trial now + seq seconds). */
+  private isoCache = new Map<number, string>();
   isoAt(seq: number): string {
-    return new Date((this.nowSec + seq) * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+    const cached = this.isoCache.get(seq);
+    if (cached !== undefined) return cached;
+    const value = new Date((this.nowSec + seq) * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+    this.isoCache.set(seq, value);
+    return value;
   }
 
   // -----------------------------------------------------------------------------------------
@@ -491,8 +496,14 @@ export class Store {
   }
 
   /** Global (Relay) ids: opaque base64, stable across reads. */
+  private globalIdCache = new Map<string, string>();
   globalId(kind: string, id: number): string {
-    return Buffer.from(`${kind}:${id}`, 'utf8').toString('base64');
+    const key = `${kind}:${id}`;
+    const cached = this.globalIdCache.get(key);
+    if (cached !== undefined) return cached;
+    const value = Buffer.from(key, 'utf8').toString('base64');
+    this.globalIdCache.set(key, value);
+    return value;
   }
 
   parseGlobalId(id: string): { kind: string; id: number } | null {

@@ -208,6 +208,59 @@ function commentJson(store: Store, repo: Repo, issue: Issue, comment: { id: numb
 }
 
 // -------------------------------------------------------------------------------------------
+// pre-serialized single-issue responses
+// -------------------------------------------------------------------------------------------
+
+/**
+ * The read workload GETs one unchanged issue 2,000 times in a row, so rebuilding
+ * its object and re-stringifying it every time is pure waste. The cache holds the
+ * serialized bytes keyed by the issue's mutable content: any mutation changes at
+ * least one compared field (PATCH bumps updatedSeq, a comment changes the count,
+ * close/reopen changes closedSeq), so a stale hit is impossible by construction.
+ */
+interface IssueJsonCache {
+  updatedSeq: number;
+  closedSeq: number | null;
+  comments: number;
+  state: string;
+  title: string;
+  body: string;
+  labels: string;
+  buf: Buffer;
+}
+
+const issueJsonCache = new WeakMap<Issue, IssueJsonCache>();
+
+function issueJsonCached(store: Store, repo: Repo, issue: Issue): Buffer {
+  const labelsKey = issue.labels.join('\n');
+  const cached = issueJsonCache.get(issue);
+  if (
+    cached !== undefined
+    && cached.updatedSeq === issue.updatedSeq
+    && cached.closedSeq === issue.closedSeq
+    && cached.comments === issue.comments.length
+    && cached.state === issue.state
+    && cached.title === issue.title
+    && cached.body === issue.body
+    && cached.labels === labelsKey
+  ) {
+    return cached.buf;
+  }
+  const buf = Buffer.from(JSON.stringify(issueJson(store, repo, issue)), 'utf8');
+  issueJsonCache.set(issue, {
+    updatedSeq: issue.updatedSeq,
+    closedSeq: issue.closedSeq,
+    comments: issue.comments.length,
+    state: issue.state,
+    title: issue.title,
+    body: issue.body,
+    labels: labelsKey,
+    buf,
+  });
+  return buf;
+}
+
+// -------------------------------------------------------------------------------------------
 // pagination
 // -------------------------------------------------------------------------------------------
 
@@ -631,7 +684,7 @@ export function handleRest(req: RestRequest): RestResponse {
       const issue = store.findIssue(repo, number);
       if (rest.length === 2) {
         if (issue === undefined) return err(404, 'Not Found');
-        if (method === 'GET') return ok(200, issueJson(store, repo, issue));
+        if (method === 'GET') return ok(200, issueJsonCached(store, repo, issue));
         if (method === 'PATCH') {
           const body = isRecord(req.body) ? req.body : {};
           if (typeof body.title === 'string') issue.title = body.title;

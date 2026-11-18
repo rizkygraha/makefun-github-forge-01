@@ -24,10 +24,10 @@ export function isOid(value: string): boolean {
 }
 
 export function hashObject(type: ObjType, data: Uint8Array): string {
-  const body = Buffer.from(data);
+  // No Buffer.from copy: createHash.update takes the Uint8Array as-is.
   const hash = createHash('sha1');
-  hash.update(Buffer.from(`${type} ${body.length}\0`, 'utf8'));
-  hash.update(body);
+  hash.update(Buffer.from(`${type} ${data.length}\0`, 'utf8'));
+  hash.update(data);
   return hash.digest('hex');
 }
 
@@ -96,7 +96,7 @@ export interface TreeEntry {
 }
 
 export function parseTree(data: Uint8Array): TreeEntry[] {
-  const buffer = Buffer.from(data);
+  const buffer = Buffer.isBuffer(data) ? data : Buffer.from(data);
   const entries: TreeEntry[] = [];
   let offset = 0;
   while (offset < buffer.length) {
@@ -138,7 +138,7 @@ export interface CommitView {
 }
 
 export function parseCommit(data: Uint8Array): CommitView {
-  const buffer = Buffer.from(data);
+  const buffer = Buffer.isBuffer(data) ? data : Buffer.from(data);
   const blank = buffer.indexOf('\n\n');
   const headerEnd = blank < 0 ? buffer.length : blank;
   const message = blank < 0 ? '' : buffer.subarray(blank + 2).toString('utf8');
@@ -187,7 +187,7 @@ export interface TagView {
 }
 
 export function parseTag(data: Uint8Array): TagView {
-  const buffer = Buffer.from(data);
+  const buffer = Buffer.isBuffer(data) ? data : Buffer.from(data);
   const blank = buffer.indexOf('\n\n');
   const headerEnd = blank < 0 ? buffer.length : blank;
   const headers = new Map<string, string>();
@@ -235,9 +235,11 @@ function writePackObjectHeader(type: ObjType, size: number): Buffer {
 }
 
 export function writePack(objects: Iterable<GitObject>): Buffer {
-  const list = [...objects];
-  // Deterministic order: sort by oid so two runs pack identically.
-  list.sort((a, b) => (hashObject(a.type, a.data) < hashObject(b.type, b.data) ? -1 : 1));
+  // Hash each object ONCE for the deterministic order: the old comparator
+  // re-hashed both sides on every comparison (O(n log n) SHA-1s).
+  const withOid = [...objects].map((object) => ({ object, oid: hashObject(object.type, object.data) }));
+  withOid.sort((a, b) => (a.oid < b.oid ? -1 : a.oid > b.oid ? 1 : 0));
+  const list = withOid.map((entry) => entry.object);
   const parts: Buffer[] = [];
   const header = Buffer.allocUnsafe(12);
   header.write('PACK', 0, 4, 'ascii');
@@ -245,7 +247,7 @@ export function writePack(objects: Iterable<GitObject>): Buffer {
   header.writeUInt32BE(list.length, 8);
   parts.push(header);
   for (const object of list) {
-    const data = Buffer.from(object.data);
+    const data = Buffer.isBuffer(object.data) ? object.data : Buffer.from(object.data);
     parts.push(writePackObjectHeader(object.type, data.length));
     parts.push(deflateSync(data));
   }
@@ -359,7 +361,8 @@ export interface PackReadResult {
  * and its declared size checked; the trailer checksum is verified.
  */
 export function readPack(pack: Uint8Array, options: { resolveBase?: (oid: string) => GitObject | undefined } = {}): PackReadResult {
-  const buffer = Buffer.from(pack);
+  // No full copy when the caller already hands us a Buffer (the push path does).
+  const buffer = Buffer.isBuffer(pack) ? pack : Buffer.from(pack);
   if (buffer.length < 32) throw new Error(`pack is ${buffer.length} bytes, too short`);
   if (buffer.subarray(0, 4).toString('ascii') !== 'PACK') throw new Error('pack does not start with PACK');
   const version = buffer.readUInt32BE(4);

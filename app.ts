@@ -43,10 +43,32 @@ function readBody(req: http.IncomingMessage): Promise<Buffer> {
 }
 
 function bearerToken(req: http.IncomingMessage): string | null {
-  const header = req.headers.authorization;
-  if (typeof header !== 'string') return null;
-  const match = /^(?:Bearer|token)\s+(.+)$/i.exec(header.trim());
-  return match ? match[1]!.trim() : null;
+  let header = req.headers.authorization;
+  if (typeof header !== 'string' || header === '') return null;
+  // llhttp already strips surrounding whitespace, but stay safe for odd clients.
+  if (header.charCodeAt(0) === 32 || header.charCodeAt(0) === 9) header = header.trim();
+  const space = header.indexOf(' ');
+  if (space <= 0) return null;
+  const scheme = header.slice(0, space).toLowerCase();
+  if (scheme !== 'bearer' && scheme !== 'token') return null;
+  const token = header.slice(space + 1).trim();
+  return token === '' ? null : token;
+}
+
+/** True when the request carries no body: GET/HEAD with no (or zero) Content-Length. */
+function hasNoBody(req: http.IncomingMessage): boolean {
+  const method = (req.method ?? 'GET').toUpperCase();
+  if (method !== 'GET' && method !== 'HEAD') return false;
+  const length = req.headers['content-length'];
+  return length === undefined || length === '0';
+}
+
+function safeDecode(segment: string): string {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return segment;
+  }
 }
 
 function tokenIsValid(token: string | null): boolean {
@@ -66,7 +88,8 @@ export function createApp(): App {
       res.end();
       return;
     }
-    const payload = Buffer.from(JSON.stringify(body), 'utf8');
+    // A Buffer body is already serialized (pre-serialized hot paths): send it as-is.
+    const payload = Buffer.isBuffer(body) ? body : Buffer.from(JSON.stringify(body), 'utf8');
     res.writeHead(status, {
       'Content-Type': 'application/json',
       'Content-Length': payload.length,
@@ -78,8 +101,11 @@ export function createApp(): App {
   const server = http.createServer(async (req, res) => {
     requestCounter += 1;
     try {
-      const url = new URL(req.url ?? '/', 'http://127.0.0.1');
-      const pathname = url.pathname;
+      // Manual URL split: `new URL()` costs ~10 us per request and the routes
+      // only need the raw pathname plus (rarely) the query string.
+      const rawUrl = req.url ?? '/';
+      const qIndex = rawUrl.indexOf('?');
+      const pathname = qIndex < 0 ? rawUrl : rawUrl.slice(0, qIndex);
       const method = (req.method ?? 'GET').toUpperCase();
 
       if (pathname === '/healthz') {
@@ -145,18 +171,12 @@ export function createApp(): App {
 
       // REST v3.
       if (pathname === '/api/v3' || pathname.startsWith('/api/v3/')) {
-        const segments = pathname
-          .slice('/api/v3'.length)
-          .split('/')
-          .filter((segment) => segment !== '')
-          .map((segment) => {
-            try {
-              return decodeURIComponent(segment);
-            } catch {
-              return segment;
-            }
-          });
-        const raw = await readBody(req);
+        const segments: string[] = [];
+        for (const part of pathname.slice('/api/v3'.length).split('/')) {
+          if (part === '') continue;
+          segments.push(part.includes('%') ? safeDecode(part) : part);
+        }
+        const raw = hasNoBody(req) ? Buffer.alloc(0) : await readBody(req);
         let parsed: unknown;
         try {
           parsed = raw.length === 0 ? undefined : JSON.parse(raw.toString('utf8'));
@@ -168,7 +188,7 @@ export function createApp(): App {
           store,
           method,
           segments,
-          query: url.searchParams,
+          query: qIndex < 0 ? new URLSearchParams() : new URLSearchParams(rawUrl.slice(qIndex + 1)),
           body: parsed,
           host: req.headers.host ?? '127.0.0.1',
           authed: tokenIsValid(bearerToken(req)),
@@ -177,7 +197,7 @@ export function createApp(): App {
           sendJson(res, 204, null);
           return;
         }
-        const payload = Buffer.from(JSON.stringify(result.body), 'utf8');
+        const payload = Buffer.isBuffer(result.body) ? result.body : Buffer.from(JSON.stringify(result.body), 'utf8');
         const headers: Record<string, string | number> = {
           'Content-Type': 'application/json',
           'Content-Length': payload.length,
@@ -202,13 +222,14 @@ export function createApp(): App {
           return;
         }
         const protocolV2 = (req.headers['git-protocol'] ?? '').includes('version=2');
-        const raw = await readBody(req);
+        const raw = hasNoBody(req) ? Buffer.alloc(0) : await readBody(req);
         if (action === 'info/refs') {
           if (method !== 'GET') {
             sendJson(res, 405, { message: 'Method Not Allowed' });
             return;
           }
-          const service = url.searchParams.get('service');
+          const query = qIndex < 0 ? new URLSearchParams() : new URLSearchParams(rawUrl.slice(qIndex + 1));
+          const service = query.get('service');
           if (service !== 'git-upload-pack' && service !== 'git-receive-pack') {
             sendJson(res, 400, { message: 'Missing or invalid service parameter' });
             return;

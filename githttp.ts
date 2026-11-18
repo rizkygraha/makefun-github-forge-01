@@ -88,6 +88,9 @@ function v2Advertisement(): Buffer {
   return pktLines([`version 2\n`, ...UPLOAD_V2_CAPS.split('\n').filter((line) => line !== '').map((line) => `${line}\n`), 'flush']);
 }
 
+/** The v2 capability advertisement never changes (no refs in it): build once, reuse. */
+const V2_ADVERTISEMENT = v2Advertisement();
+
 function v0Advertisement(store: Store, repo: Repo, service: 'git-upload-pack' | 'git-receive-pack'): Buffer {
   const caps =
     service === 'git-upload-pack'
@@ -113,7 +116,7 @@ function v0Advertisement(store: Store, repo: Repo, service: 'git-upload-pack' | 
 
 export function infoRefs(store: Store, repo: Repo, service: 'git-upload-pack' | 'git-receive-pack', protocolV2: boolean): { contentType: string; body: Buffer } {
   if (service === 'git-upload-pack' && protocolV2) {
-    return { contentType: 'application/x-git-upload-pack-advertisement', body: v2Advertisement() };
+    return { contentType: 'application/x-git-upload-pack-advertisement', body: V2_ADVERTISEMENT };
   }
   return {
     contentType: `application/x-${service}-advertisement`,
